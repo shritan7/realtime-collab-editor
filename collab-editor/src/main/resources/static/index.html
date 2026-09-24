@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Collaborative Editor</title>
+    <style>
+        body { font-family: sans-serif; max-width: 700px; margin: 40px auto; }
+        textarea {
+            width: 100%;
+            height: 400px;
+            font-size: 16px;
+            padding: 10px;
+            box-sizing: border-box;
+        }
+        #status { color: gray; font-size: 14px; margin-bottom: 8px; }
+    </style>
+</head>
+<body>
+<h2>Collaborative Editor</h2>
+<div id="status">Connecting...</div>
+
+<div style="display: flex; gap: 20px;">
+    <textarea id="editor" placeholder="Start typing..." style="flex: 3;"></textarea>
+    <div style="flex: 1; border: 1px solid #ccc; padding: 10px; border-radius: 6px; height: 380px;">
+        <strong>Online now</strong>
+        <ul id="userList" style="list-style: none; padding-left: 0; margin-top: 10px;"></ul>
+    </div>
+</div>
+<script>
+    const editor = document.getElementById("editor");
+    const status = document.getElementById("status");
+    const userList = document.getElementById("userList");
+    const socket = new WebSocket("ws://" + window.location.host + "/editor");
+
+    let previousValue = "";
+    let applyingRemote = false;
+
+    socket.onopen = () => { status.textContent = "Connected"; };
+    socket.onclose = () => { status.textContent = "Disconnected"; };
+
+    function diff(oldStr, newStr) {
+        let prefixLen = 0;
+        const minLen = Math.min(oldStr.length, newStr.length);
+        while (prefixLen < minLen && oldStr[prefixLen] === newStr[prefixLen]) {
+            prefixLen++;
+        }
+        let oldEnd = oldStr.length;
+        let newEnd = newStr.length;
+        while (oldEnd > prefixLen && newEnd > prefixLen &&
+        oldStr[oldEnd - 1] === newStr[newEnd - 1]) {
+            oldEnd--;
+            newEnd--;
+        }
+        return {
+            type: "edit",
+            position: prefixLen,
+            deleteCount: oldEnd - prefixLen,
+            insertText: newStr.slice(prefixLen, newEnd)
+        };
+    }
+
+    function applyOperation(text, op) {
+        return text.slice(0, op.position) + op.insertText + text.slice(op.position + op.deleteCount);
+    }
+
+    function renderUserList(users) {
+        userList.innerHTML = "";
+        users.forEach(name => {
+            const li = document.createElement("li");
+            li.textContent = "🟢 " + name;
+            li.style.marginBottom = "6px";
+            userList.appendChild(li);
+        });
+    }
+
+    editor.addEventListener("input", () => {
+        if (applyingRemote) return;
+        const op = diff(previousValue, editor.value);
+        previousValue = editor.value;
+        if (socket.readyState === WebSocket.OPEN) {
+            socket.send(JSON.stringify(op));
+        }
+    });
+
+    socket.onmessage = (event) => {
+        const msg = JSON.parse(event.data);
+
+        if (msg.type === "presence") {
+            renderUserList(msg.users);
+            return;
+        }
+
+        if (msg.type === "sync") {
+            applyingRemote = true;
+            editor.value = msg.text;
+            previousValue = msg.text;
+            applyingRemote = false;
+            return;
+        }
+
+        // Otherwise, it's an edit operation
+        const cursorStart = editor.selectionStart;
+        const cursorEnd = editor.selectionEnd;
+
+        applyingRemote = true;
+        editor.value = applyOperation(editor.value, msg);
+        previousValue = editor.value;
+        applyingRemote = false;
+
+        const delta = msg.insertText.length - msg.deleteCount;
+        const shift = (pos) => (pos > msg.position ? pos + delta : pos);
+        editor.setSelectionRange(shift(cursorStart), shift(cursorEnd));
+    };
+</script>
+</body>
+</html>
