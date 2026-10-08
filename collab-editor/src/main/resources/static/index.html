@@ -29,7 +29,8 @@
     const editor = document.getElementById("editor");
     const status = document.getElementById("status");
     const userList = document.getElementById("userList");
-    const socket = new WebSocket("ws://" + window.location.host + "/editor");
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const socket = new WebSocket(protocol + "//" + window.location.host + "/editor");
 
     let previousValue = "";
     let applyingRemote = false;
